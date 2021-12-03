@@ -1,3 +1,13 @@
+function Login {
+    $context = Get-AzContext
+
+    if (!$context) {
+        Connect-AzAccount
+    } 
+    else {
+        Write-Host "Already connected to Azure AD"
+    }
+}
 
 function Format-PropagateTagsToChildren {
     #first we need params
@@ -11,6 +21,8 @@ function Format-PropagateTagsToChildren {
         [Parameter()] #will ask if you want to skip subscription tags
         [Switch] $skipTags
     )
+
+    Login
 
     #put alerts at beginning of command
     if ($appendTags) {
@@ -343,6 +355,8 @@ function Format-PropagateTagsWithInheritance {
         [Switch] $overwriteTags
     )
 
+    Login
+
     #put alerts at beginning of command
     if ($appendTags) {
         Write-Host "WARNING: appending tags is enabled" -ForegroundColor Yellow
@@ -587,7 +601,32 @@ function Format-PropagateTagsWithInheritance {
 }
 
 function Find-LocateOutdatedDependicies {
+    #first we need params
+    param (
+        [Parameter(Mandatory = $true)] #will get the name of the targeted subscription/group/resource
+        [string] $orgId
+    )
 
+    #this will require you to log in to azure devops
+    Login
+    #then it will ask you for scope
+    #after that it will begin
+
+    # Define organization base url, API version variables
+    $orgUrl = "https://dev.azure.com/$orgId"
+    $pat = (Get-AzAccessToken).Token
+    $queryString = "api-version=5.1"
+
+    # Create header with PAT
+    $token = [System.Convert]::ToBase64String([System.Text.Encoding]::ASCII.GetBytes(":$($pat)"))
+    $header = @{authorization = "Basic $token" }
+
+    # Get the list of all projects in the organization
+    $projectsUrl = "$orgUrl/_apis/projects?$queryString"
+    $projects = Invoke-RestMethod -Uri $projectsUrl -Method Get -ContentType "application/json" -Headers $header
+    $projects.value | ForEach-Object {
+        Write-Host $_.id $_.name
+    }
 }
 
 Export-ModuleMember -Function Format-PropagateTagsToChildren, Format-PropagateTagsWithInheritance, Find-LocateOutdatedDependicies
