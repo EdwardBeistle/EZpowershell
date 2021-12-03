@@ -612,16 +612,16 @@ function Find-LocateOutdatedDependicies {
     #then it will ask you for scope
     #after that it will begin
 
-    # Define organization base url, API version variables
+    # define organization base url, api version variables
     $orgUrl = "https://dev.azure.com/$orgId"
     $pat = (Get-AzAccessToken).Token
     $queryString = "api-version=5.1"
 
-    # Create header with PAT
+    # create header with pat
     $token = [System.Convert]::ToBase64String([System.Text.Encoding]::ASCII.GetBytes(":$($pat)"))
     $header = @{authorization = "Basic $token" }
 
-    # Get the list of all projects in the organization
+    # get the list of all projects in the organization
     $projectsUrl = "$orgUrl/_apis/projects?$queryString"
     $projects = Invoke-RestMethod -Uri $projectsUrl -Method Get -ContentType "application/json" -Headers $header
     $projects.value | ForEach-Object {
