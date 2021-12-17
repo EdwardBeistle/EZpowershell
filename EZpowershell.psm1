@@ -603,28 +603,35 @@ function Format-PropagateTagsWithInheritance {
 function Find-LocateOutdatedDependicies {
     #first we need params
     param (
-        [Parameter(Mandatory = $true)] #will get the name of the targeted subscription/group/resource
-        [string] $orgId
+        [Parameter(Mandatory = $true)]
+        [string] $orgId,
+        [switch] $results
     )
 
-    #this will require you to log in to azure devops
+    #this will require you to log into azure devops
     Login
-    #then it will ask you for scope
 
-    # define organization base url, api version variables
+    #define organization base url, api version, and other vars
+    $rootPath = Get-Location
     $orgUrl = "https://dev.azure.com/$orgId"
     $pat = (Get-AzAccessToken -ResourceUrl "499b84ac-1321-427f-aa17-267ca6975798").Token
     $queryString = "api-version=5.1"
 
-    # create header with pat
+    #create header with PAT
     $token = [System.Convert]::ToBase64String([System.Text.Encoding]::ASCII.GetBytes(":$($pat)"))
     $header = @{authorization = "Basic $token" }
 
-    # get the list of all projects in the organization
+    #get the project
     $projectsUrl = "$orgUrl/_apis/projects?$queryString"
-    $projects = Invoke-RestMethod -Uri $projectsUrl -Method Get -ContentType "application/json" -Headers $header
-    #check if we error out here
 
+    try {
+        $projects = Invoke-RestMethod -Uri $projectsUrl -Method Get -ContentType "application/json" -Headers $header
+    }
+    catch { 
+        Write-Host "Error, organization name invalid" -ForegroundColor Red
+        exit 
+    }
+    
     Write-Host "[A] All" -ForegroundColor Yellow
     $projects.value | ForEach-Object { $i = 0 } {
 
@@ -634,7 +641,7 @@ function Find-LocateOutdatedDependicies {
         $i++
     } { $i-- }
 
-    #handle the input
+    #handle the project selecton input
     function getIdChoice {
         $id = Read-Host "Select project"
 
@@ -655,27 +662,56 @@ function Find-LocateOutdatedDependicies {
     $handledInput = getIdChoice
     $projectId = & { if ($null -ne $handledInput) { $projects.value[$handledInput].id }else { $null } };
 
-    # have them choose or have them choose all
     $reposUrl = "$orgUrl/$projectId/_apis/git/repositories?$queryString"
+
+    #handle the local directiory selection
+    function getDirectoryChoice {
+        $path = Read-Host "Provide a local temp directory"
+        $p = & { if (Test-Path $path) { $path }else { getDirectoryChoice } }
+    
+        return Resolve-Path -Path $p
+    }
+    
+    $targetPath = getDirectoryChoice
+
+    #install posh git just in case
+    if (!(Get-Module -ListAvailable -Name "posh-git")) {
+        Write-Host "posh-git not installed, installing now..." -ForegroundColor Red
+        Install-Module posh-git -Scope CurrentUser -Force
+        Import-Module posh-git
+    } 
+
     $repos = Invoke-RestMethod -Uri $reposUrl -Method Get -ContentType "application/json" -Headers $header
-    $repos.value | ForEach-Object { $i = 0 } {
+    $repos.value | ForEach-Object { $j = 0 } {
+        Write-Host "Repo #${j}:" $_.project.name "  --  " $_.name -ForegroundColor Cyan
 
-        # for each we should do something like 
+        $localPath = New-Item -Name $_.name -ItemType "directory" -Path "$targetPath" -Force
 
-        # pull .csproj
+        Set-Location $localPath
+
+        #run the git commands
+        git init
+        git remote add -f origin $_.remoteUrl 
+        git checkout -- "*.cs"
+        #for each we should do something like 
+
+        #git .csproj
 
         #check .csproj
 
         #mutate var
 
         #clean local repo
+        Set-Location $rootPath
+        Remove-Item $localPath
 
-        Write-Host "[$i]" $_.project.name "  --  " $_.name
-
-        $i++
+        $j++
     }
 
     #now use git to get only the certain .csproj files
+
+    #reset the location
+    Set-Location $rootPath
 }
 
 Export-ModuleMember -Function Format-PropagateTagsToChildren, Format-PropagateTagsWithInheritance, Find-LocateOutdatedDependicies
