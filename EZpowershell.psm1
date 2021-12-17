@@ -610,11 +610,10 @@ function Find-LocateOutdatedDependicies {
     #this will require you to log in to azure devops
     Login
     #then it will ask you for scope
-    #after that it will begin
 
     # define organization base url, api version variables
     $orgUrl = "https://dev.azure.com/$orgId"
-    $pat = (Get-AzAccessToken).Token
+    $pat = (Get-AzAccessToken -ResourceUrl "499b84ac-1321-427f-aa17-267ca6975798").Token
     $queryString = "api-version=5.1"
 
     # create header with pat
@@ -624,9 +623,59 @@ function Find-LocateOutdatedDependicies {
     # get the list of all projects in the organization
     $projectsUrl = "$orgUrl/_apis/projects?$queryString"
     $projects = Invoke-RestMethod -Uri $projectsUrl -Method Get -ContentType "application/json" -Headers $header
-    $projects.value | ForEach-Object {
-        Write-Host $_.id $_.name
+    #check if we error out here
+
+    Write-Host "[A] All" -ForegroundColor Yellow
+    $projects.value | ForEach-Object { $i = 0 } {
+
+        Write-Host "[$i] " -NoNewline -ForegroundColor Yellow
+        Write-Host $_.name
+
+        $i++
+    } { $i-- }
+
+    #handle the input
+    function getIdChoice {
+        $id = Read-Host "Select project"
+
+        switch -Regex ($id) {
+            "a" {
+                return $null
+            }
+            "[0-$i]" {
+                return $id
+            }
+            Default {
+                #try again
+                getIdChoice
+            }
+        }
     }
+
+    $handledInput = getIdChoice
+    $projectId = & { if ($null -ne $handledInput) { $projects.value[$handledInput].id }else { $null } };
+
+    # have them choose or have them choose all
+    $reposUrl = "$orgUrl/$projectId/_apis/git/repositories?$queryString"
+    $repos = Invoke-RestMethod -Uri $reposUrl -Method Get -ContentType "application/json" -Headers $header
+    $repos.value | ForEach-Object { $i = 0 } {
+
+        # for each we should do something like 
+
+        # pull .csproj
+
+        #check .csproj
+
+        #mutate var
+
+        #clean local repo
+
+        Write-Host "[$i]" $_.project.name "  --  " $_.name
+
+        $i++
+    }
+
+    #now use git to get only the certain .csproj files
 }
 
 Export-ModuleMember -Function Format-PropagateTagsToChildren, Format-PropagateTagsWithInheritance, Find-LocateOutdatedDependicies
