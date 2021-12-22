@@ -683,28 +683,31 @@ function Find-LocateOutdatedDependicies {
 
     $repos = Invoke-RestMethod -Uri $reposUrl -Method Get -ContentType "application/json" -Headers $header
     $repos.value | ForEach-Object { $j = 0 } {
-        Write-Host "Repo #${j}:" $_.project.name "  --  " $_.name -ForegroundColor Cyan
+        $repoName = $_.name
+        Write-Host "Repo #${j}:" $_.project.name "  --  " $repoName -ForegroundColor Cyan
 
-        $localPath = New-Item -Name $_.name -ItemType "directory" -Path "$targetPath" -Force
+        $localPath = New-Item -Name $repoName -ItemType "directory" -Path "$targetPath" -Force
+        $workingPath = New-Item -Name "WORKING_$repoName" -ItemType "directory" -Path "$targetPath" -Force
+
+        #run the git command
+        git clone $_.remoteUrl $localPath --quiet | Wait-Process
 
         Set-Location $localPath
+        $fileArray = Get-ChildItem $localPath -Recurse -File -Include "*.csproj"
+        $fileArray | ForEach-Object { Move-Item -Path $_.FullName -Destination $workingPath } | Wait-Process
 
-        #run the git commands
-        git init
-        git remote add -f origin $_.remoteUrl 
-        git checkout -- "*.cs"
+        #reset and clean the local repo
+        Set-Location $rootPath
+        Remove-Item $localPath -Recurse -Force -Confirm:$false
+
+        #TODO:
         #for each we should do something like 
-
         #git .csproj
-
         #check .csproj
-
         #mutate var
 
-        #clean local repo
-        Set-Location $rootPath
-        Remove-Item $localPath
 
+        #Remove-Item $workingPath -Recurse -Force
         $j++
     }
 
@@ -714,4 +717,83 @@ function Find-LocateOutdatedDependicies {
     Set-Location $rootPath
 }
 
-Export-ModuleMember -Function Format-PropagateTagsToChildren, Format-PropagateTagsWithInheritance, Find-LocateOutdatedDependicies
+
+function Get-GenerateCSV {
+    #this will require you to log into azure devops
+    Login
+    $pat = (Get-AzAccessToken).Token
+
+    #define organization base url, api version
+    $orgUrl = "https://management.azure.com"
+    $queryString = "api-version=2020-01-01"
+    $header = @{authorization = "Bearer $pat" }
+
+    #defines the master list of all the tags
+    $list = @{}
+
+    #get the subs
+    $subUrl = "$orgUrl/subscriptions?$queryString"
+    $subResponse = Invoke-RestMethod -Uri $subUrl -Method Get -ContentType "application/json" -Headers $header
+
+    #for each subscription
+    $subResponse.value | ForEach-Object {
+        #make a custom object for our tags
+        $tempTags = [PSCustomObject]@{Application = $_.tags.Application; Client = $_.tags.Client; CostCenter = $_.tags.CostCenter }
+
+        if ($null -eq $tempTags.Application ) {
+            $tempTags.Application = "undefined"
+        }
+
+        if ($null -eq $tempTags.Client ) {
+            $tempTags.Client = "undefined"
+        }
+
+        if ($null -eq $tempTags.CostCenter ) {
+            $tempTags.CostCenter = "undefined"
+        }
+
+        #first add the tags and give us the key just in case
+        $list.Add($_.id, $tempTags)
+        $subKey = $_.id
+
+        #now we get the resource groups in the sub
+        $groupUrl = "$orgUrl$subkey/resourcegroups?$queryString"
+        $groupResponse = Invoke-RestMethod -Uri $groupUrl -Method Get -ContentType "application/json" -Headers $header
+
+        #for each group
+        $groupResponse.value | ForEach-Object {
+            #make a custom object for our tags
+            $tempTagsGroup = [PSCustomObject]@{Application = $_.tags.Application; Client = $_.tags.Client; CostCenter = $_.tags.CostCenter }
+
+            if ($null -eq $tempTagsGroup.Application ) {
+                $tempTagsGroup.Application = $tempTags.Application
+            }
+
+            if ($null -eq $tempTagsGroup.Client ) {
+                $tempTagsGroup.Client = $tempTags.Client
+            }
+
+            if ($null -eq $tempTagsGroup.CostCenter ) {
+                $tempTagsGroup.CostCenter = $tempTags.CostCenter
+            }
+
+            #first add the tags and give us the key just in case
+            $list.Add($_.id, $tempTagsGroup)
+            $groupKey = $_.id
+
+            #now we get the resources in the group
+            $resUrl = "$orgUrl$groupKey/resources?$queryString"
+            $resResponse = Invoke-RestMethod -Uri $resUrl -Method Get -ContentType "application/json" -Headers $header
+        }
+    }
+
+    $list.GetEnumerator() | ForEach-Object { [PSCustomObject]@{key = $_.Key; value = ConvertTo-Json $_.Value } } | Export-Csv -Path .\temp\export.csv -NoTypeInformation
+
+    print the master list
+    $list.GetEnumerator() | ForEach-Object {
+        Write-Host $_.Key " " -ForegroundColor Cyan -NoNewline
+        Write-Host $_.Value
+    }
+}
+
+Export-ModuleMember -Function Format-PropagateTagsToChildren, Format-PropagateTagsWithInheritance, Find-LocateOutdatedDependicies, Get-GenerateCSV
