@@ -1,4 +1,15 @@
 function Login {
+    #TODO:
+    #we should run this here is we error out at first
+    #Install-Module -Name Az -Scope CurrentUser -Repository PSGallery -Force
+
+    #install Az just in case
+    if (!(Get-Module -ListAvailable -Name "Az.Accounts")) {
+        Write-Host "Az not installed, installing now..." -ForegroundColor Red
+        Install-Module -Name Az -Scope CurrentUser -Repository PSGallery -Force
+        Import-Module Az
+    } 
+
     $context = Get-AzContext
 
     if (!$context) {
@@ -615,7 +626,7 @@ function Find-LocateOutdatedDependicies {
     $rootPath = Get-Location
     $orgUrl = "https://dev.azure.com/$orgId"
     $pat = (Get-AzAccessToken -ResourceUrl "499b84ac-1321-427f-aa17-267ca6975798").Token
-    $queryString = "api-version=5.1"
+    $queryString = "api-version=7.1-preview.1"
 
     #create header with PAT
     $token = [System.Convert]::ToBase64String([System.Text.Encoding]::ASCII.GetBytes(":$($pat)"))
@@ -639,7 +650,7 @@ function Find-LocateOutdatedDependicies {
         Write-Host $_.name
 
         $i++
-    } { $i-- }
+    }
 
     #handle the project selecton input
     function getIdChoice {
@@ -649,7 +660,7 @@ function Find-LocateOutdatedDependicies {
             "a" {
                 return $null
             }
-            "[0-$i]" {
+            "[0-9]" {
                 return $id
             }
             Default {
@@ -663,51 +674,57 @@ function Find-LocateOutdatedDependicies {
     $projectId = & { if ($null -ne $handledInput) { $projects.value[$handledInput].id }else { $null } };
 
     $reposUrl = "$orgUrl/$projectId/_apis/git/repositories?$queryString"
-
-    #handle the local directiory selection
-    function getDirectoryChoice {
-        $path = Read-Host "Provide a local temp directory"
-        $p = & { if (Test-Path $path) { $path }else { getDirectoryChoice } }
     
-        return Resolve-Path -Path $p
-    }
-    
-    $targetPath = getDirectoryChoice
-
-    #install posh git just in case
-    if (!(Get-Module -ListAvailable -Name "posh-git")) {
-        Write-Host "posh-git not installed, installing now..." -ForegroundColor Red
-        Install-Module posh-git -Scope CurrentUser -Force
-        Import-Module posh-git
-    } 
 
     $repos = Invoke-RestMethod -Uri $reposUrl -Method Get -ContentType "application/json" -Headers $header
     $repos.value | ForEach-Object { $j = 0 } {
-        $repoName = $_.name
-        Write-Host "Repo #${j}:" $_.project.name "  --  " $repoName -ForegroundColor Cyan
+        Write-Host "Repo #${j}:" $_.project.name "  --  " $_.name -ForegroundColor Cyan
 
-        $localPath = New-Item -Name $repoName -ItemType "directory" -Path "$targetPath" -Force
-        $workingPath = New-Item -Name "WORKING_$repoName" -ItemType "directory" -Path "$targetPath" -Force
+        $id = $_.id
+        $listUrl = "$orgUrl/$projectId/_apis/git/repositories/$id/items?recursionLevel=99&$queryString"
+        
+        try {
+            $files = Invoke-RestMethod -Uri $listUrl -Method Get -ContentType "application/json" -Headers $header
 
-        #run the git command
-        git clone $_.remoteUrl $localPath --quiet | Wait-Process
+            $files.value | ForEach-Object { $k = 0 } {
+                function recurseFileTree($data) {
+                    #take in an array for file objs
+                    $path = $data.path
 
-        Set-Location $localPath
-        $fileArray = Get-ChildItem $localPath -Recurse -File -Include "*.csproj"
-        $fileArray | ForEach-Object { Move-Item -Path $_.FullName -Destination $workingPath } | Wait-Process
+                    #if we are a folder call this function woo
+                    if ($data.isFolder) {
+                        #call REST and recurse
+                        try {
+                            $recurseUrl = "$orgUrl/$projectId/_apis/git/repositories/$id/items?scopePath=$path&recursionLevel=99&$queryString"
+                            $recurseFiles = Invoke-RestMethod -Uri $recurseUrl -Method Get -ContentType "application/json" -Headers $header
 
-        #reset and clean the local repo
-        Set-Location $rootPath
-        Remove-Item $localPath -Recurse -Force -Confirm:$false
+                            $recurseFiles.value | ForEach-Object { $j = 0 } { if ($j -ne 0) { recurseFileTree($_) } $j++ }
+                        }
+                        catch {
+                            #do nothing for now
+                        }
+                    }
+                    elseif ($path -clike "*.csproj") {
+                        $fileUrl = "$orgUrl/$projectId/_apis/git/repositories/$id/items?path=$path&download=true&$queryString"
 
-        #TODO:
-        #for each we should do something like 
-        #git .csproj
-        #check .csproj
-        #mutate var
+                        [xml]$file = Invoke-RestMethod -Uri $fileUrl -Method Get -ContentType "application/json" -Headers $header
 
+                        #if file contains a TargetFrameworkVersion
 
-        #Remove-Item $workingPath -Recurse -Force
+                        if($null -ne $file.Project.PropertyGroup.TargetFramework){
+                            Write-Host $file.Project.PropertyGroup.TargetFramework
+                        }
+                    }
+                }
+
+                if ($k -ne 0) { recurseFileTree($_) }
+                $k++
+            }
+        }
+        catch {
+            #do nothing for now 
+        }
+
         $j++
     }
 
@@ -789,7 +806,7 @@ function Get-GenerateCSV {
 
     $list.GetEnumerator() | ForEach-Object { [PSCustomObject]@{key = $_.Key; value = ConvertTo-Json $_.Value } } | Export-Csv -Path .\temp\export.csv -NoTypeInformation
 
-    print the master list
+    #print the master list
     $list.GetEnumerator() | ForEach-Object {
         Write-Host $_.Key " " -ForegroundColor Cyan -NoNewline
         Write-Host $_.Value
