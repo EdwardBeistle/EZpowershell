@@ -673,6 +673,9 @@ function Find-LocateOutdatedDependicies {
     $handledInput = getIdChoice
     $projectId = & { if ($null -ne $handledInput) { $projects.value[$handledInput].id }else { $null } };
 
+    Write-Host $projectId
+
+
     $reposUrl = "$orgUrl/$projectId/_apis/git/repositories?$queryString"
     
 
@@ -681,49 +684,59 @@ function Find-LocateOutdatedDependicies {
         Write-Host "Repo #${j}:" $_.project.name "  --  " $_.name -ForegroundColor Cyan
 
         $id = $_.id
-        $listUrl = "$orgUrl/$projectId/_apis/git/repositories/$id/items?recursionLevel=99&$queryString"
+        $listUrl = "$orgUrl/$projectId/_apis/git/repositories/$id/items?scopePath=/&recursionLevel=99&$queryString"
         
-        try {
-            $files = Invoke-RestMethod -Uri $listUrl -Method Get -ContentType "application/json" -Headers $header
+        $files = Invoke-RestMethod -Uri $listUrl -Method Get -ContentType "application/json" -Headers $header
 
-            $files.value | ForEach-Object { $k = 0 } {
-                function recurseFileTree($data) {
-                    #take in an array for file objs
-                    $path = $data.path
+        $files.value | ForEach-Object {
+            function recurseFileTree($data) {
+                #take in an array for file objs
+                $path = $data.path
 
-                    #if we are a folder call this function woo
-                    if ($data.isFolder) {
-                        #call REST and recurse
-                        try {
-                            $recurseUrl = "$orgUrl/$projectId/_apis/git/repositories/$id/items?scopePath=$path&recursionLevel=99&$queryString"
-                            $recurseFiles = Invoke-RestMethod -Uri $recurseUrl -Method Get -ContentType "application/json" -Headers $header
+                #if we are a folder call this function woo
+                if ($data.isFolder -eq $true) {
+                    #call REST and recurse
+                    $recurseUrl = "$orgUrl/$projectId/_apis/git/repositories/$id/items?scopePath=$path&recursionLevel=99&$queryString"
+                    $recurseFiles = Invoke-RestMethod -Uri $recurseUrl -Method Get -ContentType "application/json" -Headers $header
 
-                            $recurseFiles.value | ForEach-Object { $j = 0 } { if ($j -ne 0) { recurseFileTree($_) } $j++ }
-                        }
-                        catch {
-                            #do nothing for now
-                        }
-                    }
-                    elseif ($path -clike "*.csproj") {
-                        $fileUrl = "$orgUrl/$projectId/_apis/git/repositories/$id/items?path=$path&download=true&$queryString"
+                    # Write-Host $recurseFiles.value
 
-                        [xml]$file = Invoke-RestMethod -Uri $fileUrl -Method Get -ContentType "application/json" -Headers $header
+                    $recurseFiles.value | ForEach-Object {
+                            
 
-                        #if file contains a TargetFrameworkVersion
-
-                        if($null -ne $file.Project.PropertyGroup.TargetFramework){
-                            Write-Host $file.Project.PropertyGroup.TargetFramework
+                        if ($_.path -ne $path) {
+                            recurseFileTree($_)
                         }
                     }
                 }
 
-                if ($k -ne 0) { recurseFileTree($_) }
-                $k++
+                if ($path -clike "*.csproj") {
+                    $fileUrl = "$orgUrl/$projectId/_apis/git/repositories/$id/items?path=$path&download=true&$queryString"
+
+                    $temp = Invoke-RestMethod -Uri $fileUrl -Method Get -ContentType "application/json" -Headers $header
+                    $file = $null
+
+                    try {
+                        [xml]$file = $temp -replace "\xEF\xBB\xBF", ""
+                    }
+                    catch {
+                        [xml]$file = $temp
+                    }
+                        
+                    #if file contains a TargetFrameworkVersion
+                    if (![string]::IsNullOrWhiteSpace($file.Project.PropertyGroup.TargetFramework)) {
+                        Write-Host $file.Project.PropertyGroup.TargetFramework
+                    }
+
+                    if (![string]::IsNullOrWhiteSpace($file.Project.PropertyGroup.TargetFrameworks)) {
+                        Write-Host $file.Project.PropertyGroup.TargetFrameworks
+                    }
+                }
             }
+
+            recurseFileTree($_)
         }
-        catch {
-            #do nothing for now 
-        }
+
 
         $j++
     }
