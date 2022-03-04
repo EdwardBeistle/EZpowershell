@@ -1,2 +1,2 @@
 # EZpowershell
-This powershell module is for oddjobs and tasks that are to manually tedious but do not need to be fully automated.
+This powershell module is for odd jobs and tasks that are too manually tedious but do not need to be fully automated.
