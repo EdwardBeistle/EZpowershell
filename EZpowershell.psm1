@@ -611,6 +611,7 @@ function Format-PropagateTagsWithInheritance {
     }
 }
 
+# TODO: include regex for repo names, allow input array of target versions, and allow a table and summary view
 function Find-LocateOutdatedDependicies {
     #first we need params
     param (
@@ -673,9 +674,6 @@ function Find-LocateOutdatedDependicies {
     $handledInput = getIdChoice
     $projectId = & { if ($null -ne $handledInput) { $projects.value[$handledInput].id }else { $null } };
 
-    Write-Host $projectId
-
-
     $reposUrl = "$orgUrl/$projectId/_apis/git/repositories?$queryString"
     
 
@@ -686,57 +684,71 @@ function Find-LocateOutdatedDependicies {
         $id = $_.id
         $listUrl = "$orgUrl/$projectId/_apis/git/repositories/$id/items?scopePath=/&recursionLevel=99&$queryString"
         
-        $files = Invoke-RestMethod -Uri $listUrl -Method Get -ContentType "application/json" -Headers $header
+        $telemetry
 
-        $files.value | ForEach-Object {
-            function recurseFileTree($data) {
-                #take in an array for file objs
-                $path = $data.path
+        try {
+            $files = Invoke-RestMethod -Uri $listUrl -Method Get -ContentType "application/json" -Headers $header
 
-                #if we are a folder call this function woo
-                if ($data.isFolder -eq $true) {
-                    #call REST and recurse
-                    $recurseUrl = "$orgUrl/$projectId/_apis/git/repositories/$id/items?scopePath=$path&recursionLevel=99&$queryString"
-                    $recurseFiles = Invoke-RestMethod -Uri $recurseUrl -Method Get -ContentType "application/json" -Headers $header
+            $files.value | ForEach-Object {
+                function recurseFileTree($data) {
+                    #take in an array for file objs
+                    $path = $data.path
 
-                    # Write-Host $recurseFiles.value
+                    #if we are a folder call this function woo
+                    if ($data.isFolder -eq $true) {
+                        #call REST and recurse
+                        $recurseUrl = "$orgUrl/$projectId/_apis/git/repositories/$id/items?scopePath=$path&recursionLevel=99&$queryString"
+                        $recurseFiles = Invoke-RestMethod -Uri $recurseUrl -Method Get -ContentType "application/json" -Headers $header
 
-                    $recurseFiles.value | ForEach-Object {
-                            
+                        # Write-Host $recurseFiles.value
 
-                        if ($_.path -ne $path) {
-                            recurseFileTree($_)
+                        $recurseFiles.value | ForEach-Object {
+                            if ($_.path -ne $path) {
+                                recurseFileTree($_)
+                            }
+                        }
+                    }
+
+                    if ($path -clike "*.csproj") {
+                        $fileUrl = "$orgUrl/$projectId/_apis/git/repositories/$id/items?path=$path&download=true&$queryString"
+
+                        $temp = Invoke-RestMethod -Uri $fileUrl -Method Get -ContentType "application/json" -Headers $header
+                        $file = $null
+
+                        #removes the UTFBOM delimiter
+                        try {
+                            [xml]$file = $temp -replace "\xEF\xBB\xBF", ""
+                        }
+                        catch {
+                            [xml]$file = $temp
+                        }
+
+                        if ($results) {
+                        
+                            #if file contains a TargetFrameworkVersion
+                            if (![string]::IsNullOrWhiteSpace($file.Project.PropertyGroup.TargetFramework)) {
+                                Write-Host $path " -- " -NoNewline
+
+                                Write-Host  $file.Project.PropertyGroup.TargetFramework  -ForegroundColor Yellow
+                            }
+
+                            if (![string]::IsNullOrWhiteSpace($file.Project.PropertyGroup.TargetFrameworks)) {
+                                Write-Host $path " -- " -NoNewline
+
+                                Write-Host $path $file.Project.PropertyGroup.TargetFrameworks  -ForegroundColor Yellow
+                            }
                         }
                     }
                 }
 
-                if ($path -clike "*.csproj") {
-                    $fileUrl = "$orgUrl/$projectId/_apis/git/repositories/$id/items?path=$path&download=true&$queryString"
-
-                    $temp = Invoke-RestMethod -Uri $fileUrl -Method Get -ContentType "application/json" -Headers $header
-                    $file = $null
-
-                    try {
-                        [xml]$file = $temp -replace "\xEF\xBB\xBF", ""
-                    }
-                    catch {
-                        [xml]$file = $temp
-                    }
-                        
-                    #if file contains a TargetFrameworkVersion
-                    if (![string]::IsNullOrWhiteSpace($file.Project.PropertyGroup.TargetFramework)) {
-                        Write-Host $file.Project.PropertyGroup.TargetFramework
-                    }
-
-                    if (![string]::IsNullOrWhiteSpace($file.Project.PropertyGroup.TargetFrameworks)) {
-                        Write-Host $file.Project.PropertyGroup.TargetFrameworks
-                    }
+                if ($_.path -ne "/") {
+                    recurseFileTree($_)
                 }
             }
-
-            recurseFileTree($_)
         }
-
+        catch {
+            Write-Host "Error repo is most likely empty!" -ForegroundColor Red
+        }
 
         $j++
     }
