@@ -764,7 +764,7 @@ function Find-LocateOutdatedDependicies {
                         }
 
                         #add to our list
-                        $export.Add($path, $exportedInfo)
+                        $export.Add($id + " " + $path, $exportedInfo)
                     }
                 }
 
