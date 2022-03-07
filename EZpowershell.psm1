@@ -705,79 +705,78 @@ function Find-LocateOutdatedDependicies {
 
             try {
                 $files = Invoke-RestMethod -Uri $listUrl -Method Get -ContentType "application/json" -Headers $header
+
+                $files.value | ForEach-Object {
+                    function recurseFileTree($data) {
+                        #take in an array for file objs
+                        $path = $data.path
+    
+                        #if we are a folder call this function woo
+                        if ($data.isFolder -eq $true) {
+                            #call REST and recurse
+                            $recurseUrl = "$orgUrl/$projectId/_apis/git/repositories/$id/items?scopePath=" + [System.Web.HttpUtility]::UrlEncode($path) + "&recursionLevel=99&$queryString"
+                            $recurseFiles = Invoke-RestMethod -Uri $recurseUrl -Method Get -ContentType "application/json" -Headers $header
+    
+                            # Write-Host $recurseFiles.value
+    
+                            $recurseFiles.value | ForEach-Object {
+                                if ($_.path -ne $path) {
+                                    recurseFileTree($_)
+                                }
+                            }
+                        }
+    
+                        if ($path -clike "*.csproj") {
+                            #define our object which will go in the export
+                            $exportedInfo = [PSCustomObject]@{Repo = $id; Path = $path; Values = $null; IsOutdated = $false }
+    
+                            $fileUrl = "$orgUrl/$projectId/_apis/git/repositories/$id/items?path=" + [System.Web.HttpUtility]::UrlEncode($path) + "&download=true&$queryString"
+    
+                            $temp = Invoke-RestMethod -Uri $fileUrl -Method Get -ContentType "application/json" -Headers $header
+                            $file = $null
+    
+                            #removes the UTFBOM delimiter
+                            try {
+                                [xml]$file = $temp -replace "\xEF\xBB\xBF", ""
+                            }
+                            catch {
+                                [xml]$file = $temp
+                            }
+    
+                            #if file contains a TargetFrameworkVersion
+                            if (![string]::IsNullOrWhiteSpace($file.Project.PropertyGroup.TargetFramework)) {
+                                Write-Host $path " -- " -NoNewline
+                                Write-Host  $file.Project.PropertyGroup.TargetFramework  -ForegroundColor Yellow
+    
+                                $exportedInfo.Values = , $file.Project.PropertyGroup.TargetFramework
+                            }
+    
+                            if (![string]::IsNullOrWhiteSpace($file.Project.PropertyGroup.TargetFrameworks)) {
+                                Write-Host $path " -- " -NoNewline
+                                Write-Host $path $file.Project.PropertyGroup.TargetFrameworks  -ForegroundColor Yellow
+    
+                                $exportedInfo.Values = , $file.Project.PropertyGroup.TargetFrameworks
+                            }
+    
+                            # check if we are outdated here
+                            $exportedInfo.Values | ForEach-Object {
+                                if (!$acceptedVersions.Contains($_)) {
+                                    $exportedInfo.IsOutdated = $true
+                                }
+                            }
+    
+                            #add to our list
+                            $export.Add($id + " " + $path, $exportedInfo)
+                        }
+                    }
+    
+                    if ($_.path -ne "/") {
+                        recurseFileTree($_)
+                    }
+                }
             }
             catch {
                 Write-Host "Error repo is most likely empty!" -ForegroundColor Red
-                continue
-            }
-
-            $files.value | ForEach-Object {
-                function recurseFileTree($data) {
-                    #take in an array for file objs
-                    $path = $data.path
-
-                    #if we are a folder call this function woo
-                    if ($data.isFolder -eq $true) {
-                        #call REST and recurse
-                        $recurseUrl = "$orgUrl/$projectId/_apis/git/repositories/$id/items?scopePath=" + [System.Web.HttpUtility]::UrlEncode($path) + "&recursionLevel=99&$queryString"
-                        $recurseFiles = Invoke-RestMethod -Uri $recurseUrl -Method Get -ContentType "application/json" -Headers $header
-
-                        # Write-Host $recurseFiles.value
-
-                        $recurseFiles.value | ForEach-Object {
-                            if ($_.path -ne $path) {
-                                recurseFileTree($_)
-                            }
-                        }
-                    }
-
-                    if ($path -clike "*.csproj") {
-                        #define our object which will go in the export
-                        $exportedInfo = [PSCustomObject]@{Repo = $id; Path = $path; Values = $null; IsOutdated = $false }
-
-                        $fileUrl = "$orgUrl/$projectId/_apis/git/repositories/$id/items?path=" + [System.Web.HttpUtility]::UrlEncode($path) + "&download=true&$queryString"
-
-                        $temp = Invoke-RestMethod -Uri $fileUrl -Method Get -ContentType "application/json" -Headers $header
-                        $file = $null
-
-                        #removes the UTFBOM delimiter
-                        try {
-                            [xml]$file = $temp -replace "\xEF\xBB\xBF", ""
-                        }
-                        catch {
-                            [xml]$file = $temp
-                        }
-
-                        #if file contains a TargetFrameworkVersion
-                        if (![string]::IsNullOrWhiteSpace($file.Project.PropertyGroup.TargetFramework)) {
-                            Write-Host $path " -- " -NoNewline
-                            Write-Host  $file.Project.PropertyGroup.TargetFramework  -ForegroundColor Yellow
-
-                            $exportedInfo.Values = , $file.Project.PropertyGroup.TargetFramework
-                        }
-
-                        if (![string]::IsNullOrWhiteSpace($file.Project.PropertyGroup.TargetFrameworks)) {
-                            Write-Host $path " -- " -NoNewline
-                            Write-Host $path $file.Project.PropertyGroup.TargetFrameworks  -ForegroundColor Yellow
-
-                            $exportedInfo.Values = , $file.Project.PropertyGroup.TargetFrameworks
-                        }
-
-                        # check if we are outdated here
-                        $exportedInfo.Values | ForEach-Object {
-                            if (!$acceptedVersions.Contains($_)) {
-                                $exportedInfo.IsOutdated = $true
-                            }
-                        }
-
-                        #add to our list
-                        $export.Add($id + " " + $path, $exportedInfo)
-                    }
-                }
-
-                if ($_.path -ne "/") {
-                    recurseFileTree($_)
-                }
             }
         }
 
