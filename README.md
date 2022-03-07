@@ -28,10 +28,10 @@ This cmd sets the tags of all children under either a subscription or a resource
 Format-PropagateTagsToChildren resourceId -a -o -s
 ```
 
-resourceId - the string of the Azure resource to act as the root
-appendTags - flag to allow appending new tags
-overwriteTags - flag to allow overwriting of tags
-skipTags - flag to allow the root element to not have tags IF it is a subscription
+- resourceId - the string of the Azure resource to act as the root
+- appendTags - flag to allow appending new tags
+- overwriteTags - flag to allow overwriting of tags
+- skipTags - flag to allow the root element to not have tags IF it is a subscription
 
 ### Format-PropagateTagsWithInheritance
 
@@ -41,9 +41,9 @@ This cmd is similiar to propagation but instead defaults to inheritance. In this
 Format-PropagateTagsWithInheritance subscriptionId -a -o
 ```
 
-subscriptionId - the string of the Azure subscription
-appendTags - flag to allow appending new tags
-overwriteTags - flag to allow overwriting of tags
+- subscriptionId - the string of the Azure subscription
+- appendTags - flag to allow appending new tags
+- overwriteTags - flag to allow overwriting of tags
 
 ### Find-LocateOutdatedDependicies
 
@@ -53,10 +53,10 @@ This cmd searches each scoped repo and aggragates the TargetFramework & TargetFr
 Find-LocateOutdatedDependicies ordId acceptedVersions regex -r
 ```
 
-orgId - the string of the ADO org to scope to
-acceptedVersions - an array of accepted versions, expected strings can be found [here](https://docs.microsoft.com/en-us/dotnet/standard/frameworks)
-regex - a regex statement that will be compared to every repo's name, if there is a match it will check that repo
-results - flag for exporting results to export.csv
+- orgId - the string of the ADO org to scope to
+- acceptedVersions - an array of accepted versions, expected strings can be found [here](https://docs.microsoft.com/en-us/dotnet/standard/frameworks)
+- regex - a regex statement that will be compared to every repo's name, if there is a match it will check that repo
+- results - flag for exporting results to export.csv
 
 ### Get-GenerateTagCSV
 
