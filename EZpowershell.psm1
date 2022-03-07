@@ -703,7 +703,13 @@ function Find-LocateOutdatedDependicies {
             $id = $_.id
             $listUrl = "$orgUrl/$projectId/_apis/git/repositories/$id/items?scopePath=/&recursionLevel=99&$queryString"
 
-            $files = Invoke-RestMethod -Uri $listUrl -Method Get -ContentType "application/json" -Headers $header
+            try {
+                $files = Invoke-RestMethod -Uri $listUrl -Method Get -ContentType "application/json" -Headers $header
+            }
+            catch {
+                Write-Host "Error repo is most likely empty!" -ForegroundColor Red
+                continue
+            }
 
             $files.value | ForEach-Object {
                 function recurseFileTree($data) {
