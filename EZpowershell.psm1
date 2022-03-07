@@ -611,17 +611,30 @@ function Format-PropagateTagsWithInheritance {
     }
 }
 
-# TODO: include regex for repo names, allow input array of target versions, and allow a table and summary view
 function Find-LocateOutdatedDependicies {
     #first we need params
     param (
         [Parameter(Mandatory = $true)]
         [string] $orgId,
+        [Parameter()]
+        [String[]] $acceptedVersions,
+        [Parameter()]
+        [string] $regex,
+        [Parameter()]
         [switch] $results
     )
 
     #this will require you to log into azure devops
     Login
+
+    #default values
+    if (!$acceptedVersions) {
+        $acceptedVersions = , ""
+    }
+
+    if (!$regex) {
+        $regex = ".*"
+    }
 
     #define organization base url, api version, and other vars
     $rootPath = Get-Location
@@ -671,22 +684,24 @@ function Find-LocateOutdatedDependicies {
         }
     }
 
+    #the lst of data goes somethinglike
+    #repo, path, type, isOutdated
+    $export = @{}
+
     $handledInput = getIdChoice
     $projectId = & { if ($null -ne $handledInput) { $projects.value[$handledInput].id }else { $null } };
 
     $reposUrl = "$orgUrl/$projectId/_apis/git/repositories?$queryString"
     
-
     $repos = Invoke-RestMethod -Uri $reposUrl -Method Get -ContentType "application/json" -Headers $header
     $repos.value | ForEach-Object { $j = 0 } {
         Write-Host "Repo #${j}:" $_.project.name "  --  " $_.name -ForegroundColor Cyan
 
         $id = $_.id
         $listUrl = "$orgUrl/$projectId/_apis/git/repositories/$id/items?scopePath=/&recursionLevel=99&$queryString"
-        
-        $telemetry
 
-        try {
+        if (($_.name -match $regex)) {
+
             $files = Invoke-RestMethod -Uri $listUrl -Method Get -ContentType "application/json" -Headers $header
 
             $files.value | ForEach-Object {
@@ -710,6 +725,9 @@ function Find-LocateOutdatedDependicies {
                     }
 
                     if ($path -clike "*.csproj") {
+                        #define our object which will go in the export
+                        $exportedInfo = [PSCustomObject]@{Repo = $id; Path = $path; Values = $null; IsOutdated = $false }
+
                         $fileUrl = "$orgUrl/$projectId/_apis/git/repositories/$id/items?path=$path&download=true&$queryString"
 
                         $temp = Invoke-RestMethod -Uri $fileUrl -Method Get -ContentType "application/json" -Headers $header
@@ -723,21 +741,30 @@ function Find-LocateOutdatedDependicies {
                             [xml]$file = $temp
                         }
 
-                        if ($results) {
-                        
-                            #if file contains a TargetFrameworkVersion
-                            if (![string]::IsNullOrWhiteSpace($file.Project.PropertyGroup.TargetFramework)) {
-                                Write-Host $path " -- " -NoNewline
+                        #if file contains a TargetFrameworkVersion
+                        if (![string]::IsNullOrWhiteSpace($file.Project.PropertyGroup.TargetFramework)) {
+                            Write-Host $path " -- " -NoNewline
+                            Write-Host  $file.Project.PropertyGroup.TargetFramework  -ForegroundColor Yellow
 
-                                Write-Host  $file.Project.PropertyGroup.TargetFramework  -ForegroundColor Yellow
-                            }
+                            $exportedInfo.Values = , $file.Project.PropertyGroup.TargetFramework
+                        }
 
-                            if (![string]::IsNullOrWhiteSpace($file.Project.PropertyGroup.TargetFrameworks)) {
-                                Write-Host $path " -- " -NoNewline
+                        if (![string]::IsNullOrWhiteSpace($file.Project.PropertyGroup.TargetFrameworks)) {
+                            Write-Host $path " -- " -NoNewline
+                            Write-Host $path $file.Project.PropertyGroup.TargetFrameworks  -ForegroundColor Yellow
 
-                                Write-Host $path $file.Project.PropertyGroup.TargetFrameworks  -ForegroundColor Yellow
+                            $exportedInfo.Values = , $file.Project.PropertyGroup.TargetFrameworks
+                        }
+
+                        # check if we are outdated here
+                        $exportedInfo.Values | ForEach-Object {
+                            if (!$acceptedVersions.Contains($_)) {
+                                $exportedInfo.IsOutdated = $true
                             }
                         }
+
+                        #add to our list
+                        $export.Add($path, $exportedInfo)
                     }
                 }
 
@@ -745,9 +772,6 @@ function Find-LocateOutdatedDependicies {
                     recurseFileTree($_)
                 }
             }
-        }
-        catch {
-            Write-Host "Error repo is most likely empty!" -ForegroundColor Red
         }
 
         $j++
@@ -757,10 +781,17 @@ function Find-LocateOutdatedDependicies {
 
     #reset the location
     Set-Location $rootPath
+
+    #now we export everything to a csv
+    if ($results) {
+        $export.GetEnumerator() | ForEach-Object { [PSCustomObject]@{repo = $_.Value.Repo; path = $_.Value.Path; values = ($_.Value.Values -join ","); outdated = $_.Value.IsOutdated } } | Export-Csv -Path .\export.csv -NoTypeInformation     
+    }
+
+    $export.GetEnumerator() | ForEach-Object { [PSCustomObject]@{repo = $_.Value.Repo; path = $_.Value.Path; values = ($_.Value.Values -join ","); outdated = $_.Value.IsOutdated } }  | Format-Table
 }
 
 
-function Get-GenerateCSV {
+function Get-GenerateTagCSV {
     #this will require you to log into azure devops
     Login
     $pat = (Get-AzAccessToken).Token
@@ -829,7 +860,7 @@ function Get-GenerateCSV {
         }
     }
 
-    $list.GetEnumerator() | ForEach-Object { [PSCustomObject]@{key = $_.Key; value = ConvertTo-Json $_.Value } } | Export-Csv -Path .\temp\export.csv -NoTypeInformation
+    $list.GetEnumerator() | ForEach-Object { [PSCustomObject]@{key = $_.Key; value = ConvertTo-Json $_.Value } } | Export-Csv -Path .\export.csv -NoTypeInformation
 
     #print the master list
     $list.GetEnumerator() | ForEach-Object {
@@ -838,4 +869,4 @@ function Get-GenerateCSV {
     }
 }
 
-Export-ModuleMember -Function Format-PropagateTagsToChildren, Format-PropagateTagsWithInheritance, Find-LocateOutdatedDependicies, Get-GenerateCSV
+Export-ModuleMember -Function Format-PropagateTagsToChildren, Format-PropagateTagsWithInheritance, Find-LocateOutdatedDependicies, Get-GenerateTagCSV
