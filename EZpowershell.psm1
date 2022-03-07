@@ -712,7 +712,7 @@ function Find-LocateOutdatedDependicies {
                     #if we are a folder call this function woo
                     if ($data.isFolder -eq $true) {
                         #call REST and recurse
-                        $recurseUrl = "$orgUrl/$projectId/_apis/git/repositories/$id/items?scopePath=$path&recursionLevel=99&$queryString"
+                        $recurseUrl = "$orgUrl/$projectId/_apis/git/repositories/$id/items?scopePath=" + [System.Web.HttpUtility]::UrlEncode($path) + "&recursionLevel=99&$queryString"
                         $recurseFiles = Invoke-RestMethod -Uri $recurseUrl -Method Get -ContentType "application/json" -Headers $header
 
                         # Write-Host $recurseFiles.value
@@ -728,7 +728,7 @@ function Find-LocateOutdatedDependicies {
                         #define our object which will go in the export
                         $exportedInfo = [PSCustomObject]@{Repo = $id; Path = $path; Values = $null; IsOutdated = $false }
 
-                        $fileUrl = "$orgUrl/$projectId/_apis/git/repositories/$id/items?path=$path&download=true&$queryString"
+                        $fileUrl = "$orgUrl/$projectId/_apis/git/repositories/$id/items?path=" + [System.Web.HttpUtility]::UrlEncode($path) + "&download=true&$queryString"
 
                         $temp = Invoke-RestMethod -Uri $fileUrl -Method Get -ContentType "application/json" -Headers $header
                         $file = $null
