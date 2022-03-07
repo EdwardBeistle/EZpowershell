@@ -695,12 +695,13 @@ function Find-LocateOutdatedDependicies {
     
     $repos = Invoke-RestMethod -Uri $reposUrl -Method Get -ContentType "application/json" -Headers $header
     $repos.value | ForEach-Object { $j = 0 } {
-        Write-Host "Repo #${j}:" $_.project.name "  --  " $_.name -ForegroundColor Cyan
 
-        $id = $_.id
-        $listUrl = "$orgUrl/$projectId/_apis/git/repositories/$id/items?scopePath=/&recursionLevel=99&$queryString"
-
+        #check if they match the regex
         if (($_.name -match $regex)) {
+            Write-Host "Repo #${j}:" $_.project.name "  --  " $_.name -ForegroundColor Cyan
+
+            $id = $_.id
+            $listUrl = "$orgUrl/$projectId/_apis/git/repositories/$id/items?scopePath=/&recursionLevel=99&$queryString"
 
             $files = Invoke-RestMethod -Uri $listUrl -Method Get -ContentType "application/json" -Headers $header
 
