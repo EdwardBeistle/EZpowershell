@@ -611,7 +611,7 @@ function Format-PropagateTagsWithInheritance {
     }
 }
 
-function Find-LocateOutdatedDependicies {
+function Find-LocateOutdatedDependencies {
     #first we need params
     param (
         [Parameter(Mandatory = $true)]
@@ -875,4 +875,4 @@ function Get-GenerateTagCSV {
     }
 }
 
-Export-ModuleMember -Function Format-PropagateTagsToChildren, Format-PropagateTagsWithInheritance, Find-LocateOutdatedDependicies, Get-GenerateTagCSV
+Export-ModuleMember -Function Format-PropagateTagsToChildren, Format-PropagateTagsWithInheritance, Find-LocateOutdatedDependencies, Get-GenerateTagCSV
