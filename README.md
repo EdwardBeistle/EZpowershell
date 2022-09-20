@@ -1,12 +1,12 @@
 # EZ Powershell
 
-This powershell module is for oddjobs and tasks that are to manually tedious but do not need to be fully automated.
+This powershell module is for odd-jobs and tasks that are too manually tedious but do not need to be fully automated.
 
 ## Current cmdlets
 
 - Format-PropagateTagsToChildren
 - Format-PropagateTagsWithInheritance
-- Find-LocateOutdatedDependicies
+- Find-LocateOutdatedDependencies
 - Get-GenerateTagCSV
 
 ## Installation
@@ -35,7 +35,7 @@ Format-PropagateTagsToChildren resourceId -a -o -s
 
 ### Format-PropagateTagsWithInheritance
 
-This cmd is similiar to propagation but instead defaults to inheritance. In this case the subscription is only needed for scope.
+This cmd is similar to propagation but instead defaults to inheritance. In this case the subscription is only needed for scope.
 
 ```sh
 Format-PropagateTagsWithInheritance subscriptionId -a -o
@@ -45,12 +45,12 @@ Format-PropagateTagsWithInheritance subscriptionId -a -o
 - appendTags - flag to allow appending new tags
 - overwriteTags - flag to allow overwriting of tags
 
-### Find-LocateOutdatedDependicies
+### Find-LocateOutdatedDependencies
 
-This cmd searches each scoped repo and aggragates the TargetFramework & TargetFrameworks so that developers can know if they need to update thier dependencies.
+This cmd searches each scoped repo and aggregates the TargetFramework & TargetFrameworks so that developers can know if they need to update thier dependencies.
 
 ```sh
-Find-LocateOutdatedDependicies ordId acceptedVersions regex -r
+Find-LocateOutdatedDependencies orgId acceptedVersions regex -r
 ```
 
 - orgId - the string of the ADO org to scope to
