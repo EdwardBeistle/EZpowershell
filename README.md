@@ -47,10 +47,10 @@ Format-PropagateTagsWithInheritance subscriptionId -a -o
 
 ### Find-LocateOutdatedDependencies
 
-This cmd searches each scoped repo and aggregates the TargetFramework & TargetFrameworks so that developers can know if they need to update thier dependencies.
+This cmd searches each scoped repo and aggregates the TargetFramework & TargetFrameworks so that developers can know if they need to update their dependencies.
 
 ```sh
-Find-LocateOutdatedDependencies orgId acceptedVersions regex -r
+Find-LocateOutdatedDependencies orgId acceptedVersions regex -results
 ```
 
 - orgId - the string of the ADO org to scope to
@@ -65,3 +65,19 @@ This cmd grabs every tag from a scoped Azure resource and exports it to export.c
 ```sh
 Get-GenerateTagCSV
 ```
+
+### Find-LocateRepoFiles
+
+This cmd searches each scoped repo and searches for files with content match so that developers can locate usage.
+
+```sh
+Find-LocateRepoFiles orgId repoRx fileRx contentRx -recurse -all -results
+```
+
+- orgId - the string of the ADO org to scope to
+- repoRx - a regex statement that will be compared to every repo's name, if there is a match it will check that repo
+- fileRx - a regex statement that will be compared to every matching repo's file names, if there is a match it will check that file
+- contentRx - a regex statement that will be compared to every matching file's contents, if there is a match it will report that repo as a match
+- recurse - flag for recursing the repo folders
+- all - flag for exporting all results (only matches if not present)
+- results - flag for exporting results to export.csv
