@@ -875,4 +875,176 @@ function Get-GenerateTagCSV {
     }
 }
 
-Export-ModuleMember -Function Format-PropagateTagsToChildren, Format-PropagateTagsWithInheritance, Find-LocateOutdatedDependencies, Get-GenerateTagCSV
+function Find-LocateRepoFiles {
+    #first we need params
+    param (
+        [Parameter(Mandatory = $true)]
+        [string] $orgId,
+        [Parameter()]
+        [string] $repoRx,
+        [Parameter()]
+        [string] $fileRx,
+        [Parameter()]
+        [string] $contentRx,
+        [Parameter()]
+        [switch] $recurse,
+        [Parameter()]
+        [switch] $all,
+        [Parameter()]
+        [switch] $results
+    )
+
+    #this will require you to log into azure devops
+    Login
+
+    #define organization base url, api version, and other vars
+    $rootPath = Get-Location
+    $orgUrl = "https://dev.azure.com/$orgId"
+    $pat = (Get-AzAccessToken -ResourceUrl "499b84ac-1321-427f-aa17-267ca6975798").Token
+    $queryString = "api-version=7.1-preview.1"
+
+    #create header with PAT
+    $token = [System.Convert]::ToBase64String([System.Text.Encoding]::ASCII.GetBytes(":$($pat)"))
+    $header = @{authorization = "Basic $token" }
+
+    #get the project
+    $projectsUrl = "$orgUrl/_apis/projects?$queryString"
+
+    try {
+        $projects = Invoke-RestMethod -Uri $projectsUrl -Method Get -ContentType "application/json" -Headers $header
+    }
+    catch { 
+        Write-Host "Error, organization name invalid" -ForegroundColor Red
+        exit 
+    }
+    
+    Write-Host "[A] All" -ForegroundColor Yellow
+    $projects.value | ForEach-Object { $i = 0 } {
+
+        Write-Host "[$i] " -NoNewline -ForegroundColor Yellow
+        Write-Host $_.name
+
+        $i++
+    }
+
+    #handle the project selecton input
+    function getIdChoice {
+        $id = Read-Host "Select project"
+
+        switch -Regex ($id) {
+            "a" {
+                return $null
+            }
+            "[0-9]" {
+                return $id
+            }
+            Default {
+                #try again
+                getIdChoice
+            }
+        }
+    }
+
+    #the lst of data goes somethinglike
+    #repo, path, type, isOutdated
+    $export = @{}
+
+    $handledInput = getIdChoice
+    $projectId = & { if ($null -ne $handledInput) { $projects.value[$handledInput].id }else { $null } };
+
+    $reposUrl = "$orgUrl/$projectId/_apis/git/repositories?$queryString"
+    
+    $repos = Invoke-RestMethod -Uri $reposUrl -Method Get -ContentType "application/json" -Headers $header
+    $repos.value | ForEach-Object { $j = 0 } {
+
+        #check if they match the regex
+        if ((!$repoRx) -or ($_.name -match $repoRx)) {
+            Write-Host "Repo #${j}:" $_.project.name "  --  " $_.name -ForegroundColor Cyan
+
+            $id = $_.id
+            $projname = $_.project.name
+            $reponame = $_.name
+            $sshUrl = $_.sshUrl
+            $listUrl = "$orgUrl/$projectId/_apis/git/repositories/$id/items?scopePath=/&recursionLevel=99&$queryString"
+
+            try {
+                $files = Invoke-RestMethod -Uri $listUrl -Method Get -ContentType "application/json" -Headers $header
+
+                $files.value | ForEach-Object {
+                    function recurseFileTree($data) {
+                        #take in an array for file objs
+                        $path = $data.path
+    
+                        #if we are a folder call this function woo
+                        if ($data.isFolder -eq $true) {
+                            if($recurse) {
+                                #call REST and recurse
+                                $recurseUrl = "$orgUrl/$projectId/_apis/git/repositories/$id/items?scopePath=" + [System.Web.HttpUtility]::UrlEncode($path) + "&recursionLevel=99&$queryString"
+                                $recurseFiles = Invoke-RestMethod -Uri $recurseUrl -Method Get -ContentType "application/json" -Headers $header
+        
+                                # Write-Host $recurseFiles.value
+        
+                                $recurseFiles.value | ForEach-Object {
+                                    if ($_.path -ne $path) {
+                                        recurseFileTree($_)
+                                    }
+                                }
+                            }
+                        }
+
+                        if((!$fileRx) -or ($path -match $fileRx)) {
+                            #define our object which will go in the export
+                            $exportedInfo = [PSCustomObject]@{Proj = $projname; Repo = $reponame; SshUrl = $sshUrl; Path = $path; IsMatch = $false }
+
+                            if(!$contentRx) {
+                                $exportedInfo.IsMatch = $true
+                            }
+                            else {
+                                $fileUrl = "$orgUrl/$projectId/_apis/git/repositories/$id/items?path=" + [System.Web.HttpUtility]::UrlEncode($path) + "&download=true&$queryString"
+
+                                $temp = Invoke-RestMethod -Uri $fileUrl -Method Get -ContentType "text/plain" -Headers $header
+
+                                #if file contains a match
+                                if($temp -match $contentRx) {
+                                    $exportedInfo.IsMatch = $true
+                                }
+                            }
+
+                            if($exportedInfo.IsMatch -or $all) {
+                                #add to our list
+                                $export.Add($projname + " " + $reponame + " " + $path, $exportedInfo)
+                            }
+                        }
+                    }
+    
+                    if ($_.path -ne "/") {
+                        recurseFileTree($_)
+                    }
+                }
+            }
+            catch [System.Net.WebException] {
+                # Error repo is most likely empty
+                # "typeName":"Microsoft.TeamFoundation.Git.Server.GitItemNotFoundException, Microsoft.TeamFoundation.Git.Server","typeKey":"GitItemNotFoundException","errorCode":0,"eventId":3000
+            }
+            catch {
+                $message = $_
+                Write-Host "Error! $message" -ForegroundColor Red
+            }
+        }
+
+        $j++
+    }
+
+    #reset the location
+    Set-Location $rootPath
+
+    #now we export everything to a csv
+    if ($results) {
+        $export.GetEnumerator() | ForEach-Object { [PSCustomObject]@{proj = $_.Value.Proj; repo = $_.Value.Repo; sshurl = $_.Value.SshUrl; path = $_.Value.Path; matched = $_.Value.IsMatch } } | Export-Csv -Path .\export.csv -NoTypeInformation     
+    }
+
+    $export.GetEnumerator() | ForEach-Object { [PSCustomObject]@{proj = $_.Value.Proj; repo = $_.Value.Repo; sshurl = $_.Value.SshUrl; path = $_.Value.Path; matched = $_.Value.IsMatch} }  | Format-Table
+}
+
+
+Export-ModuleMember -Function Format-PropagateTagsToChildren, Format-PropagateTagsWithInheritance, Find-LocateOutdatedDependencies, Get-GenerateTagCSV, Find-LocateRepoFiles
