@@ -766,7 +766,7 @@ function Find-LocateOutdatedDependencies {
                             }
     
                             #add to our list
-                            $export.Add($id + " " + $path, $exportedInfo)
+                            $export.Add($id + " " + $path, $exportedInfo.psobject.copy())
                         }
                     }
     
@@ -891,7 +891,11 @@ function Find-LocateRepoFiles {
         [Parameter()]
         [switch] $all,
         [Parameter()]
-        [switch] $results
+        [switch] $quiet,
+        [Parameter()]
+        [switch] $results,
+        [Parameter()]
+        [switch] $includematches
     )
 
     #this will require you to log into azure devops
@@ -948,90 +952,154 @@ function Find-LocateRepoFiles {
     #the lst of data goes somethinglike
     #repo, path, type, isOutdated
     $export = @{}
+    $script:inx = 0
 
     $handledInput = getIdChoice
     $projectId = & { if ($null -ne $handledInput) { $projects.value[$handledInput].id }else { $null } };
 
     $reposUrl = "$orgUrl/$projectId/_apis/git/repositories?$queryString"
-    
     $repos = Invoke-RestMethod -Uri $reposUrl -Method Get -ContentType "application/json" -Headers $header
     $repos.value | ForEach-Object { $j = 0 } {
 
+        # @{id=5cd351ab-4bc3-4c88-bf8d-07304700293d;
+        #     name=RAI_SYM_FW_IoTDoc;
+        #     url=https://dev.azure.com/meshsystems/906251ef-583e-4dec-a809-f74c118f3cca/_apis/git/repositories/5cd351ab-4bc3-4c88-bf8d-07304700293d;
+        #     project=;
+        #     defaultBranch=refs/heads/develop;
+        #     size=49363;
+        #     remoteUrl=https://meshsystems@dev.azure.com/meshsystems/Mesh%20One/_git/RAI_SYM_FW_IoTDoc;
+        #     sshUrl=git@ssh.dev.azure.com:v3/meshsystems/Mesh%20One/RAI_SYM_FW_IoTDoc;
+        #     webUrl=https://dev.azure.com/meshsystems/Mesh%20One/_git/RAI_SYM_FW_IoTDoc;
+        #     isDisabled=False
+        # }
+
         #check if they match the regex
         if ((!$repoRx) -or ($_.name -match $repoRx)) {
-            Write-Host "Repo #${j}:" $_.project.name "  --  " $_.name -ForegroundColor Cyan
+            if(!$quiet) {
+                Write-Host "Repo #${j}:" $_.project.name "  --  " $_.name -ForegroundColor Cyan
+            }
 
             $id = $_.id
             $projname = $_.project.name
             $reponame = $_.name
+            $rmtUrl = $_.remoteUrl
             $sshUrl = $_.sshUrl
+            $webUrl = $_.webUrl
+            $matchedValue = ""
             $listUrl = "$orgUrl/$projectId/_apis/git/repositories/$id/items?scopePath=/&recursionLevel=99&$queryString"
 
-            try {
-                $files = Invoke-RestMethod -Uri $listUrl -Method Get -ContentType "application/json" -Headers $header
+            #define our object which will go in the export
+            $exportedInfo = [PSCustomObject]@{
+                Proj         = $projname;
+                RepoId       = $id;
+                Repo         = $reponame;
+                RmtUrl       = $rmtUrl;
+                SshUrl       = $sshUrl;
+                WebUrl       = $webUrl;
+                Path         = "";
+                MatchedValue = "";
+                IsMatch      = $false;
+            }
 
-                $files.value | ForEach-Object {
-                    function recurseFileTree($data) {
-                        #take in an array for file objs
-                        $path = $data.path
-    
-                        #if we are a folder call this function woo
-                        if ($data.isFolder -eq $true) {
-                            if($recurse) {
-                                #call REST and recurse
-                                $recurseUrl = "$orgUrl/$projectId/_apis/git/repositories/$id/items?scopePath=" + [System.Web.HttpUtility]::UrlEncode($path) + "&recursionLevel=99&$queryString"
-                                $recurseFiles = Invoke-RestMethod -Uri $recurseUrl -Method Get -ContentType "application/json" -Headers $header
+            if((!$fileRx) -and (!$contentRx)) {
+                $exportedInfo.IsMatch = $true
+                #add to our list
+                $export.Add($projname + " " + $reponame + " " + $path, $exportedInfo.psobject.copy())
+            }
+            else {
+                try {
+                    $files = Invoke-RestMethod -Uri $listUrl -Method Get -ContentType "application/json" -Headers $header
+
+                    $files.value | ForEach-Object {
+                        function recurseFileTree($data) {
+                            #take in an array for file objs
+                            $path = $data.path
         
-                                # Write-Host $recurseFiles.value
-        
-                                $recurseFiles.value | ForEach-Object {
-                                    if ($_.path -ne $path) {
-                                        recurseFileTree($_)
+                            #if we are a folder call this function woo
+                            if ($data.isFolder -eq $true) {
+                                if($recurse) {
+                                    #call REST and recurse
+                                    $recurseUrl = "$orgUrl/$projectId/_apis/git/repositories/$id/items?scopePath=" + [System.Web.HttpUtility]::UrlEncode($path) + "&recursionLevel=99&$queryString"
+                                    $recurseFiles = Invoke-RestMethod -Uri $recurseUrl -Method Get -ContentType "application/json" -Headers $header
+            
+                                    # Write-Host $recurseFiles.value
+            
+                                    $recurseFiles.value | ForEach-Object {
+                                        if ($_.path -ne $path) {
+                                            recurseFileTree($_)
+                                        }
                                     }
                                 }
                             }
-                        }
 
-                        if((!$fileRx) -or ($path -match $fileRx)) {
-                            #define our object which will go in the export
-                            $exportedInfo = [PSCustomObject]@{Proj = $projname; Repo = $reponame; SshUrl = $sshUrl; Path = $path; IsMatch = $false }
-
-                            if(!$contentRx) {
-                                $exportedInfo.IsMatch = $true
-                            }
-                            else {
-                                $fileUrl = "$orgUrl/$projectId/_apis/git/repositories/$id/items?path=" + [System.Web.HttpUtility]::UrlEncode($path) + "&download=true&$queryString"
-
-                                $temp = Invoke-RestMethod -Uri $fileUrl -Method Get -ContentType "text/plain" -Headers $header
-
-                                #if file contains a match
-                                if($temp -match $contentRx) {
+                            if ((!$fileRx) -or ($path -match $fileRx)) {
+                                if (!$contentRx) {
                                     $exportedInfo.IsMatch = $true
                                 }
-                            }
+                                else {
+                                    $fileUrl = "$orgUrl/$projectId/_apis/git/repositories/$id/items?path=" + [System.Web.HttpUtility]::UrlEncode($path) + "&download=true&$queryString"
 
-                            if($exportedInfo.IsMatch -or $all) {
-                                #add to our list
-                                $export.Add($projname + " " + $reponame + " " + $path, $exportedInfo)
+                                    $temp = Invoke-RestMethod -Uri $fileUrl -Method Get -ContentType "text/plain" -Headers $header
+
+                                    #if file contains a match
+                                    if ($temp -match $contentRx) {
+                                        $exportedInfo.IsMatch = $true
+                                        if ($includematches) {
+                                            $temp | Select-String -InputObject { $_ } -Pattern $contentRx -AllMatches |
+                                            ForEach-Object {
+                                                ForEach ($m in $_.Matches) {
+                                                    $script:inx = $script:inx + 1
+                                                    $matchedValue = $m.Groups['out'].Value
+                                                    $exportedInfo.MatchedValue = $matchedValue
+                                                    # Write-Host $script:inx "=" $exportedInfo.Repo " : " $exportedInfo.MatchedValue
+                                                    Write-Host $exportedInfo.MatchedValue
+                                                    $export.Add($projname + " " + $reponame + " " + $path + " " + $matchedValue, $exportedInfo.psobject.copy())
+
+                                                    if ($false) {
+                                                        $export.GetEnumerator() |
+                                                        ForEach-Object { 
+                                                            [PSCustomObject]@{
+                                                                proj         = $_.Value.Proj;
+                                                                repo         = $_.Value.Repo;
+                                                                matchedValue = $_.Value.MatchedValue;
+                                                            }
+                                                        } |
+                                                        Sort-Object -Property proj, repo, matchedValue |
+                                                        Format-Table
+                                                    }
+                                                }
+                                            }
+                                            $exportedInfo.IsMatch = $false
+                                        }
+                                    }
+                                }
+
+                                if ($exportedInfo.IsMatch -or $all) {
+                                    #add to our list
+                                    $export.Add($projname + " " + $reponame + " " + $path, $exportedInfo.psobject.copy())
+                                }
                             }
                         }
-                    }
-    
-                    if ($_.path -ne "/") {
-                        recurseFileTree($_)
+        
+                        if ($_.path -ne "/") {
+                            recurseFileTree($_)
+                        }
                     }
                 }
-            }
-            catch [System.Net.WebException] {
-                # Error repo is most likely empty
-                # "typeName":"Microsoft.TeamFoundation.Git.Server.GitItemNotFoundException, Microsoft.TeamFoundation.Git.Server","typeKey":"GitItemNotFoundException","errorCode":0,"eventId":3000
-            }
-            catch {
-                $message = $_
-                Write-Host "Error! $message" -ForegroundColor Red
+                catch [System.Net.WebException] {
+                    # Error repo is most likely empty
+                    # "typeName":"Microsoft.TeamFoundation.Git.Server.GitItemNotFoundException, Microsoft.TeamFoundation.Git.Server","typeKey":"GitItemNotFoundException","errorCode":0,"eventId":3000
+                    $message = $_
+                    $line = $_.InvocationInfo.ScriptLineNumber
+                    Write-Host "Error! at line $line - $message" -ForegroundColor Red
+                }
+                catch {
+                    $message = $_
+                    $line = $_.InvocationInfo.ScriptLineNumber
+                    Write-Host "Error! at line $line - $message" -ForegroundColor Red
+                }
             }
         }
-
         $j++
     }
 
@@ -1040,11 +1108,54 @@ function Find-LocateRepoFiles {
 
     #now we export everything to a csv
     if ($results) {
-        $export.GetEnumerator() | ForEach-Object { [PSCustomObject]@{proj = $_.Value.Proj; repo = $_.Value.Repo; sshurl = $_.Value.SshUrl; path = $_.Value.Path; matched = $_.Value.IsMatch } } | Export-Csv -Path .\export.csv -NoTypeInformation     
+        $export.GetEnumerator() |
+        ForEach-Object {
+            [PSCustomObject]@{
+                proj         = $_.Value.Proj;
+                repo         = $_.Value.Repo;
+                rmturl       = $_.Value.RmtUrl;
+                sshurl       = $_.Value.SshUrl;
+                weburl       = $_.Value.WebUrl;
+                path         = $_.Value.Path;
+                matched      = $_.Value.IsMatch;
+                repoId       = $_.Value.repoId;
+                matchedValue = $_.Value.MatchedValue;
+            }
+        } |
+        Sort-Object -Property proj, repo, matchedValue |
+        Export-Csv -Path .\export.csv -NoTypeInformation     
     }
 
-    $export.GetEnumerator() | ForEach-Object { [PSCustomObject]@{proj = $_.Value.Proj; repo = $_.Value.Repo; sshurl = $_.Value.SshUrl; path = $_.Value.Path; matched = $_.Value.IsMatch} }  | Format-Table
-}
+    $export.GetEnumerator() |
+    ForEach-Object { 
+        [PSCustomObject]@{
+            proj         = $_.Value.Proj;
+            repo         = $_.Value.Repo;
+            rmturl       = $_.Value.RmtUrl;
+            sshurl       = $_.Value.SshUrl;
+            weburl       = $_.Value.WebUrl;
+            path         = $_.Value.Path;
+            matched      = $_.Value.IsMatch;
+            repoId       = $_.Value.repoId;
+            matchedValue = $_.Value.MatchedValue;
+        }
+    } |
+    Sort-Object -Property proj, repo, matchedValue |
+    Format-Table
 
+    if($includeMatches) {
+	    $export.GetEnumerator() |
+	    ForEach-Object { 
+	        [PSCustomObject]@{
+	            proj         = $_.Value.Proj;
+	            repo         = $_.Value.Repo;
+	            matchedValue = $_.Value.MatchedValue;
+	        }
+	    } |
+	    Sort-Object -Property proj, repo, matchedValue |
+	    Format-Table
+	}
+	
+}
 
 Export-ModuleMember -Function Format-PropagateTagsToChildren, Format-PropagateTagsWithInheritance, Find-LocateOutdatedDependencies, Get-GenerateTagCSV, Find-LocateRepoFiles

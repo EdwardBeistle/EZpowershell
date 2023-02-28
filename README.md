@@ -76,8 +76,13 @@ Find-LocateRepoFiles orgId repoRx fileRx contentRx -recurse -all -results
 
 - orgId - the string of the ADO org to scope to
 - repoRx - a regex statement that will be compared to every repo's name, if there is a match it will check that repo
+  - e.g. `'.*_(FW|FwLib|Util)((_.*)|$)'`
 - fileRx - a regex statement that will be compared to every matching repo's file names, if there is a match it will check that file
+  - e.g. `'/\.gitmodules'`
 - contentRx - a regex statement that will be compared to every matching file's contents, if there is a match it will report that repo as a match
+  - e.g. `".*url = .*vs-ssh\.visualstudio\.com\.*"`
+- includeMatches - flag to include all matching contents in the result table, contentRx should contain a group labeled 'out' to select what should be captured for the result.
+  - e.g. `'\s*url\s*=\s*(?<out>http(s?)://github.com\S*)'`
 - recurse - flag for recursing the repo folders
 - all - flag for exporting all results (only matches if not present)
 - results - flag for exporting results to export.csv
